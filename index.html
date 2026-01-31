@@ -4,42 +4,65 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Mini Shop</title>
-  <link rel="stylesheet" href="style.css" />
+
+  <link rel="stylesheet" href="./styles.css" />
 
   <!-- Telegram WebApp JS -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
-  <!-- Config (BACKEND_URL) -->
-  <script src="config.js"></script>
+  <!-- Config -->
+  <script src="./config.js"></script>
 </head>
 <body>
-  <div class="wrap">
-    <h1>Mini Shop</h1>
+  <header class="topbar">
+    <div class="brand">Mini Shop</div>
 
-    <div class="card">
+    <div class="topbar-right">
+      <input id="search" class="search" placeholder="Поиск..." />
+      <button id="cartBtn" class="cartBtn" aria-label="Корзина">
+        🛒 <span id="cartCount" class="pill">0</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="container">
+    <div id="status" class="status"></div>
+
+    <section class="filters">
+      <select id="category" class="select">
+        <option value="">Все категории</option>
+      </select>
+    </section>
+
+    <section>
+      <div id="catalog" class="grid"></div>
+    </section>
+  </main>
+
+  <!-- Cart Drawer -->
+  <div id="backdrop" class="backdrop hidden"></div>
+
+  <aside id="drawer" class="drawer hidden">
+    <div class="drawerHead">
+      <div class="drawerTitle">Корзина</div>
+      <button id="closeCart" class="iconBtn">✕</button>
+    </div>
+
+    <div id="cartList" class="cartList"></div>
+
+    <div class="drawerFoot">
       <div class="row">
-        <div>
-          <div class="title">Товар (тест)</div>
-          <div class="muted">product_id: 62</div>
-        </div>
+        <div class="muted">Позиций</div>
+        <div id="cartItemsCount" class="strong">0</div>
       </div>
 
-      <label class="label">Размер</label>
-      <select id="size" class="input">
-        <option value="63">S</option>
-        <option value="64">M</option>
-        <option value="65">L</option>
-      </select>
+      <button id="payBtn" class="btn primary">Оплатить</button>
+      <button id="clearBtn" class="btn ghost">Очистить корзину</button>
 
-      <label class="label">Количество</label>
-      <input id="qty" class="input" type="number" min="1" max="99" value="1" />
-
-      <button id="payBtn" class="btn">Оплатить</button>
-
-      <div id="status" class="status"></div>
+      <div id="payStatus" class="payStatus"></div>
     </div>
-  </div>
+  </aside>
 
-  <script src="app.js"></script>
+  <script src="./app.js"></script>
 </body>
 </html>
