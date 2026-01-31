@@ -4,8 +4,8 @@
 
 // ВСТАВЬ СЮДА URL БЭКЕНДА (без / в конце)
 // пример: https://weapon-moderate-donors-handheld.trycloudflare.com
-https://weapon-moderate-donors-handheld.trycloudflare.com
-const DEFAULT_API_BASE = "http://127.0.0.1:8000";
+
+const DEFAULT_API_BASE = "https://weapon-moderate-donors-handheld.trycloudflare.com";
 
 // Можно переопределить через ?api=https://xxxx или localStorage
 function getApiBase() {
@@ -876,4 +876,5 @@ async function init() {
 }
 
 document.addEventListener("DOMContentLoaded", init);
+
 
