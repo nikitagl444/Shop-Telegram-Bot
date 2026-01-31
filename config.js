@@ -1,4 +1,5 @@
 window.APP_CONFIG = {
-  BACKEND_URL: "https://arbitration-reflection-birthday-involving.trycloudflare.com",
+  BACKEND_URL: "https://weapon-moderate-donors-handheld.trycloudflare.com",
 };
+
 
