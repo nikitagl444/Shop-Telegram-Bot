@@ -15,6 +15,13 @@
 *{box-sizing:border-box}
 html,body{height:100%}
 
+/* максимально режем зум/жесты (в WebView это не всегда 100%, но помогает) */
+html, body{
+  overscroll-behavior: none;
+  touch-action: pan-x pan-y;
+  -webkit-text-size-adjust: 100%;
+}
+
 body{
   margin:0;
   background: radial-gradient(1200px 600px at 20% -10%, rgba(124,92,255,.25), transparent),
