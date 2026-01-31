@@ -1,17 +1,42 @@
-// ===== FAQ (оставил твой) =====
+// ===============================
+// CONFIG
+// ===============================
+
+// ВСТАВЬ СЮДА URL БЭКЕНДА (без / в конце)
+// пример: https://weapon-moderate-donors-handheld.trycloudflare.com
+const DEFAULT_API_BASE = "http://127.0.0.1:8000";
+
+// Можно переопределить через ?api=https://xxxx или localStorage
+function getApiBase() {
+  const u = new URL(window.location.href);
+  const fromQuery = u.searchParams.get("api");
+  const fromLS = localStorage.getItem("API_BASE");
+  const base = (fromQuery || fromLS || DEFAULT_API_BASE || "").trim();
+  const clean = base.replace(/\/+$/, "");
+  if (fromQuery) localStorage.setItem("API_BASE", clean);
+  return clean;
+}
+
+const API_BASE = getApiBase();
+
+// ===============================
+// FAQ (оставил как было — можно потом вынести в backend)
+// ===============================
 const demoFaq = [
   { id: 1, question: "Как выбрать размер?", answer: "Смотрите таблицу размеров в карточке товара. Если сомневаетесь — берите на размер больше для oversize." },
-  { id: 2, question: "Сколько доставка?", answer: "Демо-ответ: доставка 1–3 дня по РБ. Стоимость зависит от города и будет добавлена позже." },
-  { id: 3, question: "Можно ли вернуть?", answer: "Да, в течение 14 дней при сохранении товарного вида (демо-правило)." }
+  { id: 2, question: "Сколько доставка?", answer: "Доставка 1–3 дня по РБ (временно). Стоимость зависит от города." },
+  { id: 3, question: "Можно ли вернуть?", answer: "Да, в течение 14 дней при сохранении товарного вида." }
 ];
 
-// ===== Helpers =====
+// ===============================
+// Helpers
+// ===============================
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const money = (n) => `${Number(n || 0).toFixed(2)} BYN`;
 
-const LS_KEY = "mini_cart_v2";
-// cart: { "productId|size": { productId, size, variationId, qty } }
+const LS_KEY = "miniapp_cart_v2";
+// cart: { "productId|variantKey": { productId, variantKey, variationId, sizeLabel, qty } }
 function loadCart() {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); }
   catch { return {}; }
@@ -20,14 +45,7 @@ function saveCart(cart) {
   localStorage.setItem(LS_KEY, JSON.stringify(cart));
   updateCartDot();
 }
-function cartKey(productId, size) { return `${productId}|${size}`; }
-
-function getCartQtyForProduct(productId) {
-  const cart = loadCart();
-  let sum = 0;
-  for (const k in cart) if (cart[k].productId === productId) sum += cart[k].qty;
-  return sum;
-}
+function cartKey(productId, variantKey) { return `${productId}|${variantKey}`; }
 
 function updateCartDot() {
   const cart = loadCart();
@@ -36,138 +54,194 @@ function updateCartDot() {
   if (dot) dot.classList.toggle("hidden", !has);
 }
 
+function getCartQtyForProduct(productId) {
+  const cart = loadCart();
+  let sum = 0;
+  for (const k in cart) if (cart[k].productId === productId) sum += cart[k].qty;
+  return sum;
+}
+
 function getUserName() {
   const tg = window.Telegram?.WebApp;
   const n = tg?.initDataUnsafe?.user?.first_name;
   return n || "друг";
 }
 
-function apiBase() {
-  const u = (window.APP_CONFIG?.BACKEND_URL || "").trim().replace(/\/+$/, "");
-  if (!u) throw new Error("BACKEND_URL не задан. Проверь config.js");
-  return u;
+function escapeHtml(str) {
+  return String(str ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
-function openPayUrl(url) {
-  const tg = window.Telegram?.WebApp;
-  if (tg?.openLink) return tg.openLink(url);
-  window.location.href = url;
+function stripHtml(html) {
+  const s = String(html ?? "");
+  if (!s) return "";
+  const div = document.createElement("div");
+  div.innerHTML = s;
+  return (div.textContent || div.innerText || "").replace(/\s+\n/g, "\n").trim();
 }
 
-function uuidv4() {
-  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
-  const rnd = () => Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1);
-  return `${rnd()}${rnd()}-${rnd()}-${rnd()}-${rnd()}-${rnd()}${rnd()}${rnd()}`;
+function declOfNum(n, titles) {
+  const cases = [2, 0, 1, 1, 1, 2];
+  return titles[(n % 100 > 4 && n % 100 < 20) ? 2 : cases[(n % 10 < 5) ? n % 10 : 5]];
 }
 
-function cartHashForIdempotency() {
-  const cart = loadCart();
-  const keys = Object.keys(cart).sort();
-  return keys.map(k => {
-    const it = cart[k];
-    const vid = Number(it.variationId || 0);
-    return `${it.productId}:${vid}:${it.qty}`;
-  }).join("|") || "empty";
+const FALLBACK_IMG =
+  "data:image/svg+xml;utf8," +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600">
+      <defs>
+        <linearGradient id="g" x1="0" x2="1">
+          <stop offset="0" stop-color="#141824"/>
+          <stop offset="1" stop-color="#0f1115"/>
+        </linearGradient>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#g)"/>
+      <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle"
+        font-family="Arial" font-size="36" fill="#9aa3b2">no image</text>
+    </svg>`
+  );
+
+function pickPhoto(p) {
+  const u =
+    p.photo_url ||
+    p.image_url ||
+    p.image ||
+    (Array.isArray(p.images) && p.images[0] && (p.images[0].src || p.images[0].url)) ||
+    "";
+  const s = String(u || "").trim();
+  if (!s || s === "-" || s === "null") return FALLBACK_IMG;
+  return s;
 }
 
-function getClientOrderIdForCart() {
-  const storeKey = "client_order_id_by_cart_v1";
-  const map = JSON.parse(sessionStorage.getItem(storeKey) || "{}");
-  const h = cartHashForIdempotency();
-  if (!map[h]) map[h] = uuidv4();
-  sessionStorage.setItem(storeKey, JSON.stringify(map));
-  return map[h];
-}
+function normalizeVariants(raw) {
+  let arr =
+    raw?.variants ||
+    raw?.sizes ||
+    raw?.variations ||
+    raw?.variation_options ||
+    [];
 
-// ===== Catalog (from backend) =====
-let products = [];
+  if (!Array.isArray(arr)) arr = [];
 
-const PLACEHOLDER_IMG = "https://placehold.co/1200x800/png?text=No+Image";
-
-function normalizeProduct(p) {
-  const id = Number(p.id);
-  const title = String(p.title || p.name || "");
-  const sku = String(p.sku || "");
-  const category = String(p.category || "Без категории");
-  const photo_url = String(p.photo_url || "") || PLACEHOLDER_IMG;
-
-  const desc = String(p.description || p.short_description || "");
-
-  const basePrice = Number(p.price_byn ?? p.price ?? 0) || 0;
-
-  const sizeToVariationId = {};
-  const sizeToPrice = {};
-  const variations = Array.isArray(p.variations) ? p.variations : [];
-
-  let sizes = ["Стандарт"];
-  if (variations.length > 0) {
-    sizes = variations.map(v => String(v.label || v.option || `Var ${v.variation_id}`));
-    for (const v of variations) {
-      const label = String(v.label || v.option || `Var ${v.variation_id}`);
-      const vid = Number(v.variation_id || 0) || 0;
-      const vp = Number(v.price_byn ?? v.price ?? basePrice) || basePrice;
-
-      sizeToVariationId[label] = vid;
-      sizeToPrice[label] = vp;
+  let out = arr.map((v) => {
+    if (typeof v === "string") {
+      return { variation_id: null, label: v, price_byn: null, in_stock: true };
     }
-  }
+    const variation_id = v.variation_id ?? v.variationId ?? v.id ?? null;
 
-  // price for list (если у variable basePrice пустой — берём min вариаций)
-  let listPrice = basePrice;
-  if ((!listPrice || listPrice <= 0) && variations.length > 0) {
-    const prices = variations.map(v => Number(v.price_byn ?? v.price ?? 0)).filter(x => x > 0);
-    if (prices.length) listPrice = Math.min(...prices);
-  }
+    // label может называться по-разному: label/size/option/name…
+    const labelRaw =
+      v.label ??
+      v.size ??
+      v.option ??
+      v.value ??
+      v.name ??
+      (variation_id ? `var ${variation_id}` : "ONE");
+
+    const price_byn =
+      v.price_byn ?? v.price ?? v.regular_price ?? v.sale_price ?? null;
+
+    // in_stock может приходить как boolean, либо stock_status
+    let in_stock = true;
+    if (typeof v.in_stock === "boolean") in_stock = v.in_stock;
+    if (typeof v.stock_status === "string") in_stock = (v.stock_status === "instock");
+
+    return {
+      variation_id: variation_id ? Number(variation_id) : null,
+      label: String(labelRaw),
+      price_byn: price_byn !== null && price_byn !== undefined && price_byn !== "" ? Number(price_byn) : null,
+      in_stock
+    };
+  });
+
+  // если пусто — делаем один "ONE"
+  if (out.length === 0) out = [{ variation_id: null, label: "ONE", price_byn: null, in_stock: true }];
+
+  // удаляем пустые label
+  out = out.map(v => ({
+    ...v,
+    label: (v.label && String(v.label).trim()) ? String(v.label).trim() : (v.variation_id ? `var ${v.variation_id}` : "ONE")
+  }));
+
+  return out;
+}
+
+function normalizeProduct(raw) {
+  const id = Number(raw?.id ?? raw?.product_id ?? raw?.productId ?? 0);
+  const title = raw?.title ?? raw?.name ?? "";
+  const sku = raw?.sku ?? "";
+  const category =
+    raw?.category ??
+    raw?.category_name ??
+    (Array.isArray(raw?.categories) && raw.categories[0] && (raw.categories[0].name || raw.categories[0])) ??
+    "Без категории";
+
+  const description = stripHtml(raw?.description ?? raw?.description_html ?? raw?.desc ?? "");
+
+  const variants = normalizeVariants(raw);
+
+  const candidatePrices = variants
+    .map(v => v.price_byn)
+    .filter(n => typeof n === "number" && !Number.isNaN(n));
+
+  const price_byn =
+    candidatePrices.length > 0
+      ? Math.min(...candidatePrices)
+      : Number(raw?.price_byn ?? raw?.price ?? raw?.regular_price ?? 0);
 
   return {
     id,
-    title,
-    sku,
-    category,
-    photo_url,
-    description: desc,
-    price_byn: listPrice || 0,
-    sizes,
-    sizeToVariationId,
-    sizeToPrice
+    title: String(title || ""),
+    sku: String(sku || ""),
+    category: String(category || "Без категории"),
+    photo_url: pickPhoto(raw),
+    description,
+    variants,
+    price_byn
   };
 }
 
-async function loadCatalog() {
-  const r = await fetch(`${apiBase()}/catalog`, { headers: { "accept": "application/json" } });
-  if (!r.ok) throw new Error(`catalog failed: ${r.status}`);
-  const data = await r.json();
-  if (!Array.isArray(data)) throw new Error("catalog: ожидался массив");
-  products = data.map(normalizeProduct);
+async function apiGet(path) {
+  const url = `${API_BASE}${path}`;
+  const r = await fetch(url, { method: "GET" });
+  if (!r.ok) throw new Error(`GET ${path} -> ${r.status}`);
+  return r.json();
 }
 
-function findProduct(productId) {
-  return products.find(x => x.id === productId);
-}
-
-function getUnitPrice(p, size) {
-  if (!p) return 0;
-  if (p.sizeToPrice && p.sizeToPrice[size] != null) return Number(p.sizeToPrice[size]) || 0;
-  return Number(p.price_byn || 0) || 0;
-}
-
-function getVariationId(p, size) {
-  const vid = Number(p?.sizeToVariationId?.[size] || 0);
-  return vid || null;
-}
-
-// ===== Splash (anti-freeze) =====
-function initSplash() {
-  try {
-    const hello = $("#hello");
-    if (hello) hello.textContent = `Здравствуй, ${getUserName()}`;
-  } catch {
-    const hello = document.getElementById("hello");
-    if (hello) hello.textContent = "Здравствуй!";
+async function apiPost(path, body) {
+  const url = `${API_BASE}${path}`;
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!r.ok) {
+    let t = "";
+    try { t = await r.text(); } catch {}
+    throw new Error(`POST ${path} -> ${r.status} ${t}`);
   }
+  return r.json();
+}
+
+// ===============================
+// Data
+// ===============================
+let products = [];
+let categories = [];
+
+// ===============================
+// Splash
+// ===============================
+function initSplash() {
+  const hello = $("#hello");
+  if (hello) hello.textContent = `Здравствуй, ${getUserName()}`;
 
   const hide = () => {
-    const splash = document.getElementById("splash");
+    const splash = $("#splash");
     if (splash) splash.classList.add("hidden");
   };
 
@@ -175,7 +249,9 @@ function initSplash() {
   setTimeout(hide, 3000);
 }
 
-// ===== Navigation / Screens =====
+// ===============================
+// Navigation / Screens
+// ===============================
 const screenMap = {
   home: "#screen-home",
   categories: "#screen-categories",
@@ -226,23 +302,33 @@ function setActiveTab(tabKey) {
   });
 }
 
-// ===== Home =====
+// ===============================
+// Render helpers
+// ===============================
+function buildImg(src, cls, alt) {
+  const img = document.createElement("img");
+  img.className = cls;
+  img.src = src || FALLBACK_IMG;
+  img.alt = alt || "";
+  img.loading = "lazy";
+  img.referrerPolicy = "no-referrer";
+  img.onerror = () => { img.onerror = null; img.src = FALLBACK_IMG; };
+  return img;
+}
+
+function getMinPrice(p) {
+  const arr = p.variants.map(v => v.price_byn).filter(n => typeof n === "number" && !Number.isNaN(n));
+  if (arr.length) return Math.min(...arr);
+  return Number(p.price_byn || 0);
+}
+
+// ===============================
+// Home
+// ===============================
 function renderHome(list) {
   const root = $("#homeList");
   if (!root) return;
   root.innerHTML = "";
-
-  if (!list || list.length === 0) {
-    root.innerHTML = `
-      <div class="row" style="grid-column: 1 / -1; cursor: default">
-        <div class="row__left">
-          <div class="row__title">Товаров пока нет</div>
-          <div class="row__sub">Добавь товары в WooCommerce — они появятся тут</div>
-        </div>
-      </div>
-    `;
-    return;
-  }
 
   for (const p of list) {
     const qtyInCart = getCartQtyForProduct(p.id);
@@ -250,17 +336,23 @@ function renderHome(list) {
 
     const card = document.createElement("div");
     card.className = "card";
-    card.innerHTML = `
-      <img class="card__img" src="${p.photo_url}" alt="${escapeHtml(p.title)}" />
-      <div class="card__body">
-        <div class="card__title">${escapeHtml(p.title)}</div>
-        <div class="card__sku">${escapeHtml(p.sku)} • ${escapeHtml(p.category)}</div>
-        <div class="card__row">
-          <div class="price">${money(p.price_byn)}</div>
-          ${inCart ? `<div class="badge">В корзине (${qtyInCart})</div>` : ``}
-        </div>
+
+    const img = buildImg(p.photo_url, "card__img", p.title);
+
+    const body = document.createElement("div");
+    body.className = "card__body";
+    body.innerHTML = `
+      <div class="card__title">${escapeHtml(p.title)}</div>
+      <div class="card__sku">${escapeHtml(p.sku)} • ${escapeHtml(p.category)}</div>
+      <div class="card__row">
+        <div class="price">${money(getMinPrice(p))}</div>
+        ${inCart ? `<div class="badge">В корзине (${qtyInCart})</div>` : ``}
       </div>
     `;
+
+    card.appendChild(img);
+    card.appendChild(body);
+
     card.addEventListener("click", () => openProduct(p.id));
     root.appendChild(card);
   }
@@ -272,22 +364,29 @@ function initSearch() {
   input.addEventListener("input", () => {
     const q = input.value.trim().toLowerCase();
     const filtered = products.filter(p =>
-      (p.title || "").toLowerCase().includes(q) ||
-      (p.sku || "").toLowerCase().includes(q)
+      p.title.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q)
     );
     renderHome(filtered);
   });
 }
 
-// ===== Categories =====
+// ===============================
+// Categories
+// ===============================
+function computeCategories() {
+  const set = new Set(products.map(p => p.category || "Без категории"));
+  categories = Array.from(set).sort((a,b) => a.localeCompare(b, "ru"));
+}
+
 function renderCategories() {
-  const cats = Array.from(new Set(products.map(p => p.category))).sort();
+  computeCategories();
+
   const root = $("#catList");
   if (!root) return;
   root.innerHTML = "";
 
-  for (const c of cats) {
-    const count = products.filter(p => p.category === c).length;
+  for (const c of categories) {
+    const count = products.filter(p => (p.category || "Без категории") === c).length;
     const row = document.createElement("div");
     row.className = "row";
     row.innerHTML = `
@@ -306,7 +405,7 @@ function openCategory(categoryName) {
   const catTitle = $("#catTitle");
   if (catTitle) catTitle.textContent = categoryName;
 
-  const list = products.filter(p => p.category === categoryName);
+  const list = products.filter(p => (p.category || "Без категории") === categoryName);
 
   const cc = $("#catCount");
   if (cc) cc.textContent = `${list.length} ${declOfNum(list.length, ["товар", "товара", "товаров"])}`;
@@ -326,42 +425,58 @@ function renderCategoryProducts(list) {
 
     const card = document.createElement("div");
     card.className = "card";
-    card.innerHTML = `
-      <img class="card__img" src="${p.photo_url}" alt="${escapeHtml(p.title)}" />
-      <div class="card__body">
-        <div class="card__title">${escapeHtml(p.title)}</div>
-        <div class="card__sku">${escapeHtml(p.sku)}</div>
-        <div class="card__row">
-          <div class="price">${money(p.price_byn)}</div>
-          ${inCart ? `<div class="badge">В корзине (${qtyInCart})</div>` : ``}
-        </div>
+
+    const img = buildImg(p.photo_url, "card__img", p.title);
+
+    const body = document.createElement("div");
+    body.className = "card__body";
+    body.innerHTML = `
+      <div class="card__title">${escapeHtml(p.title)}</div>
+      <div class="card__sku">${escapeHtml(p.sku)}</div>
+      <div class="card__row">
+        <div class="price">${money(getMinPrice(p))}</div>
+        ${inCart ? `<div class="badge">В корзине (${qtyInCart})</div>` : ``}
       </div>
     `;
+
+    card.appendChild(img);
+    card.appendChild(body);
+
     card.addEventListener("click", () => openProduct(p.id));
     root.appendChild(card);
   }
 }
 
-// ===== Product page =====
+// ===============================
+// Product page
+// ===============================
 function openProduct(productId) {
-  const p = findProduct(productId);
+  const p = products.find(x => x.id === productId);
   if (!p) return;
 
-  let selectedSize = p.sizes[0];
+  // выбираем первый доступный вариант
+  let selected = p.variants.find(v => v.in_stock) || p.variants[0];
   let qty = 1;
 
   const root = $("#productView");
   if (!root) return;
 
+  const priceForSelected = () => {
+    const pr = selected?.price_byn;
+    if (typeof pr === "number" && !Number.isNaN(pr)) return pr;
+    return getMinPrice(p);
+  };
+
   root.innerHTML = `
-    <img class="product__img" src="${p.photo_url}" alt="${escapeHtml(p.title)}" />
+    <div id="prodImgWrap"></div>
+
     <div class="product__title">${escapeHtml(p.title)}</div>
     <div class="product__meta">
       <span>${escapeHtml(p.sku)}</span>
       <span>•</span>
       <span>${escapeHtml(p.category)}</span>
       <span>•</span>
-      <strong id="prodPrice">${money(getUnitPrice(p, selectedSize))}</strong>
+      <strong id="prodPrice">${money(priceForSelected())}</strong>
     </div>
 
     <div class="pills" id="sizePills"></div>
@@ -381,34 +496,50 @@ function openProduct(productId) {
     </div>
   `;
 
+  // img
+  const wrap = $("#prodImgWrap");
+  if (wrap) {
+    const img = buildImg(p.photo_url, "product__img", p.title);
+    wrap.appendChild(img);
+  }
+
   const pills = $("#sizePills");
 
   const renderPills = () => {
     if (!pills) return;
     pills.innerHTML = "";
-    for (const s of p.sizes) {
+
+    for (const v of p.variants) {
       const b = document.createElement("button");
-      b.className = "pill" + (s === selectedSize ? " active" : "");
-      b.textContent = s;
+      const active = (v === selected);
+      b.className = "pill" + (active ? " active" : "");
+      b.textContent = v.label; // вот тут теперь будут S/M/L, а не var 96
+      if (!v.in_stock) {
+        b.disabled = true;
+        b.style.opacity = "0.45";
+      }
       b.addEventListener("click", () => {
-        selectedSize = s;
+        if (!v.in_stock) return;
+        selected = v;
+        const pr = $("#prodPrice");
+        if (pr) pr.textContent = money(priceForSelected());
         renderPills();
         renderInCartInfo();
-        const priceEl = $("#prodPrice");
-        if (priceEl) priceEl.textContent = money(getUnitPrice(p, selectedSize));
       });
       pills.appendChild(b);
     }
   };
 
+  const currentVariantKey = () => String(selected.variation_id ?? selected.label);
+
   const renderInCartInfo = () => {
     const cart = loadCart();
-    const k = cartKey(p.id, selectedSize);
+    const k = cartKey(p.id, currentVariantKey());
     const cur = cart[k]?.qty || 0;
     const el = $("#inCartInfo");
     if (!el) return;
     el.innerHTML = cur > 0
-      ? `<div class="badge" style="display:inline-flex">Уже в корзине: ${cur} шт. (размер ${escapeHtml(selectedSize)})</div>`
+      ? `<div class="badge" style="display:inline-flex">Уже в корзине: ${cur} шт. (размер ${escapeHtml(selected.label)})</div>`
       : "";
   };
 
@@ -430,15 +561,17 @@ function openProduct(productId) {
   const addBtn = $("#addToCartBtn");
   if (addBtn) addBtn.addEventListener("click", () => {
     const cart = loadCart();
-    const k = cartKey(p.id, selectedSize);
+    const k = cartKey(p.id, currentVariantKey());
     const prev = cart[k]?.qty || 0;
 
     cart[k] = {
       productId: p.id,
-      size: selectedSize,
-      variationId: getVariationId(p, selectedSize),
-      qty: Math.min(99, prev + qty)
+      variantKey: currentVariantKey(),
+      variationId: selected.variation_id ?? null,
+      sizeLabel: selected.label,
+      qty: prev + qty
     };
+
     saveCart(cart);
 
     renderHome(products);
@@ -453,7 +586,9 @@ function openProduct(productId) {
   showScreen("product", { title: "Товар" });
 }
 
-// ===== Cart =====
+// ===============================
+// Cart
+// ===============================
 function renderCart() {
   const cart = loadCart();
   const keys = Object.keys(cart);
@@ -479,41 +614,53 @@ function renderCart() {
 
   for (const k of keys) {
     const item = cart[k];
-    const p = findProduct(item.productId);
+    const p = products.find(x => x.id === item.productId);
     if (!p) continue;
 
-    const unit = getUnitPrice(p, item.size);
+    // цена: если у варианта есть price_byn — берём её
+    const v = p.variants.find(vv => String(vv.variation_id ?? vv.label) === String(item.variantKey));
+    const unit = (v && typeof v.price_byn === "number") ? v.price_byn : getMinPrice(p);
+
     const line = unit * item.qty;
     total += line;
 
     const row = document.createElement("div");
     row.className = "cartItem";
-    row.innerHTML = `
-      <img class="cartItem__img" src="${p.photo_url}" alt="${escapeHtml(p.title)}"/>
-      <div class="cartItem__mid">
-        <div class="cartItem__title">${escapeHtml(p.title)}</div>
-        <div class="cartItem__sub">${escapeHtml(p.sku)} • размер ${escapeHtml(item.size)}</div>
-        <div class="cartItem__sub"><strong>${money(unit)}</strong> за шт.</div>
-      </div>
-      <div class="cartItem__right">
-        <div class="qty" style="gap:8px">
-          <button class="qty__btn" data-act="minus" style="width:36px;height:36px">−</button>
-          <div class="qty__val" style="min-width:22px">${item.qty}</div>
-          <button class="qty__btn" data-act="plus" style="width:36px;height:36px">+</button>
-        </div>
-        <div style="font-weight:900">${money(line)}</div>
-      </div>
+
+    const img = buildImg(p.photo_url, "cartItem__img", p.title);
+
+    const mid = document.createElement("div");
+    mid.className = "cartItem__mid";
+    mid.innerHTML = `
+      <div class="cartItem__title">${escapeHtml(p.title)}</div>
+      <div class="cartItem__sub">${escapeHtml(p.sku)} • размер ${escapeHtml(item.sizeLabel || "")}</div>
+      <div class="cartItem__sub"><strong>${money(unit)}</strong> за шт.</div>
     `;
 
-    row.querySelector('[data-act="plus"]').addEventListener("click", () => {
+    const right = document.createElement("div");
+    right.className = "cartItem__right";
+    right.innerHTML = `
+      <div class="qty" style="gap:8px">
+        <button class="qty__btn" data-act="minus" style="width:36px;height:36px">−</button>
+        <div class="qty__val" style="min-width:22px">${item.qty}</div>
+        <button class="qty__btn" data-act="plus" style="width:36px;height:36px">+</button>
+      </div>
+      <div style="font-weight:900">${money(line)}</div>
+    `;
+
+    row.appendChild(img);
+    row.appendChild(mid);
+    row.appendChild(right);
+
+    right.querySelector('[data-act="plus"]').addEventListener("click", () => {
       const c = loadCart();
-      c[k].qty = Math.min(99, c[k].qty + 1);
+      c[k].qty += 1;
       saveCart(c);
       renderCart();
       renderHome(products);
     });
 
-    row.querySelector('[data-act="minus"]').addEventListener("click", () => {
+    right.querySelector('[data-act="minus"]').addEventListener("click", () => {
       const c = loadCart();
       c[k].qty -= 1;
       if (c[k].qty <= 0) delete c[k];
@@ -529,64 +676,68 @@ function renderCart() {
   if (totalEl) totalEl.textContent = money(total);
 }
 
-let checkoutInFlight = false;
+async function checkout() {
+  const tg = window.Telegram?.WebApp;
+  const btn = $("#checkoutBtn");
+
+  const cart = loadCart();
+  const keys = Object.keys(cart);
+  if (keys.length === 0) {
+    alert("Корзина пустая");
+    return;
+  }
+
+  const items = keys.map((k) => {
+    const it = cart[k];
+    const payload = {
+      product_id: it.productId,
+      quantity: it.qty
+    };
+    if (it.variationId) payload.variation_id = it.variationId;
+    return payload;
+  });
+
+  const user = tg?.initDataUnsafe?.user;
+  const customer = user ? { name: `${user.first_name || ""} ${user.last_name || ""}`.trim() } : null;
+
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = "Создаю заказ…"; }
+
+    const res = await apiPost("/create-order", {
+      items,
+      customer,
+      telegram_init_data: tg?.initData || null
+    });
+
+    const payUrl = res?.pay_url;
+    if (!payUrl) throw new Error("Backend не вернул pay_url");
+
+    // чтобы не создавать 2 заказа — чистим корзину сразу после успеха
+    saveCart({});
+    renderCart();
+    renderHome(products);
+
+    try {
+      tg?.openLink?.(payUrl);
+    } catch {
+      window.location.href = payUrl;
+    }
+  } catch (e) {
+    alert(`Ошибка оформления: ${e?.message || e}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Оформить"; }
+  }
+}
 
 function initCheckout() {
   const btn = $("#checkoutBtn");
   if (!btn) return;
-
-  btn.addEventListener("click", async () => {
-    const cart = loadCart();
-    if (Object.keys(cart).length === 0) {
-      alert("Корзина пустая");
-      return;
-    }
-    if (checkoutInFlight) return;
-
-    try {
-      checkoutInFlight = true;
-      btn.disabled = true;
-      btn.textContent = "Создаю заказ…";
-
-      const items = Object.keys(cart).map(k => {
-        const it = cart[k];
-        const payload = {
-          product_id: Number(it.productId),
-          quantity: Number(it.qty || 1),
-        };
-        const vid = Number(it.variationId || 0);
-        if (vid) payload.variation_id = vid;
-        return payload;
-      });
-
-      const body = {
-        items,
-        telegram_init_data: window.Telegram?.WebApp?.initData || "",
-        client_order_id: getClientOrderIdForCart()
-      };
-
-      const r = await fetch(`${apiBase()}/create-order`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "accept": "application/json" },
-        body: JSON.stringify(body)
-      });
-
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(`create-order ${r.status}: ${JSON.stringify(data)}`);
-
-      openPayUrl(data.pay_url);
-    } catch (e) {
-      console.error(e);
-      alert(String(e.message || e));
-    } finally {
-      checkoutInFlight = false;
-      btn.disabled = false;
-      btn.textContent = "Оформить";
-    }
-  });
+  btn.addEventListener("click", checkout);
 }
 
-// ===== FAQ =====
+// ===============================
+// FAQ
+// ===============================
 function renderFaq() {
   const root = $("#faqList");
   if (!root) return;
@@ -629,7 +780,9 @@ function initCategoryHeaderBack() {
   });
 }
 
-// ===== Tabs binding =====
+// ===============================
+// Tabs binding
+// ===============================
 function initTabs() {
   $$(".tab").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -659,26 +812,45 @@ function initTabs() {
   if (back) back.addEventListener("click", goBack);
 }
 
-// ===== Utils =====
-function escapeHtml(str) {
-  return String(str || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+// ===============================
+// Disable zoom gestures (iOS)
+// ===============================
+function disableZoomGestures() {
+  // iOS pinch
+  document.addEventListener("gesturestart", (e) => e.preventDefault());
+  document.addEventListener("gesturechange", (e) => e.preventDefault());
+  document.addEventListener("gestureend", (e) => e.preventDefault());
+
+  // iOS double-tap
+  let lastTouchEnd = 0;
+  document.addEventListener("touchend", (e) => {
+    const now = Date.now();
+    if (now - lastTouchEnd <= 300) e.preventDefault();
+    lastTouchEnd = now;
+  }, { passive: false });
 }
 
-function declOfNum(n, titles) {
-  const cases = [2, 0, 1, 1, 1, 2];
-  return titles[(n % 100 > 4 && n % 100 < 20) ? 2 : cases[(n % 10 < 5) ? n % 10 : 5]];
+// ===============================
+// Load catalog
+// ===============================
+async function loadCatalog() {
+  // ждём: { products: [...] } или просто [...]
+  const data = await apiGet("/catalog");
+  const list = Array.isArray(data) ? data : (data.products || data.items || []);
+  products = list.map(normalizeProduct).filter(p => p.id);
+
+  // если backend отдаёт категории — можно потом использовать, но сейчас считаем по товарам
+  computeCategories();
 }
 
-// ===== Init =====
+// ===============================
+// Init
+// ===============================
 async function init() {
   const tg = window.Telegram?.WebApp;
   try { tg?.ready?.(); tg?.expand?.(); } catch {}
 
+  disableZoomGestures();
   initSplash();
   initTabs();
   initCategoryHeaderBack();
@@ -687,31 +859,19 @@ async function init() {
 
   updateCartDot();
 
-  navStack = [];
-
-  // небольшой placeholder пока грузится каталог
-  const home = $("#homeList");
-  if (home) {
-    home.innerHTML = `
-      <div class="row" style="grid-column: 1 / -1; cursor: default">
-        <div class="row__left">
-          <div class="row__title">Загрузка каталога…</div>
-          <div class="row__sub">Подключаемся к серверу</div>
-        </div>
-      </div>
-    `;
+  // Загружаем товары
+  try {
+    await loadCatalog();
+  } catch (e) {
+    // если не достучались до API — покажем понятную ошибку
+    alert(`Не удалось загрузить каталог.\nПроверь API_BASE в app.js\nСейчас: ${API_BASE}\n\n${e?.message || e}`);
+    products = [];
   }
 
-  await loadCatalog();
-
+  navStack = [];
   renderHome(products);
   showScreen("home", { title: "Главная" });
   setActiveTab("home");
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-  init().catch(err => {
-    console.error(err);
-    alert("Не удалось загрузить каталог. Проверь BACKEND_URL в config.js и endpoint /catalog на backend.");
-  });
-});
+document.addEventListener("DOMContentLoaded", init);
