@@ -1,8 +1,8 @@
-// ===== FAQ (можешь менять тексты как хочешь) =====
+// ===== FAQ (оставил твой) =====
 const demoFaq = [
-  { id: 1, question: "Как выбрать размер?", answer: "Смотрите размеры в карточке товара. Если сомневаетесь — напишите в поддержку." },
-  { id: 2, question: "Сколько доставка?", answer: "Доставка по РБ. Срок и стоимость зависят от города (уточним при оформлении)." },
-  { id: 3, question: "Можно ли вернуть?", answer: "Да, в течение 14 дней при сохранении товарного вида." }
+  { id: 1, question: "Как выбрать размер?", answer: "Смотрите таблицу размеров в карточке товара. Если сомневаетесь — берите на размер больше для oversize." },
+  { id: 2, question: "Сколько доставка?", answer: "Демо-ответ: доставка 1–3 дня по РБ. Стоимость зависит от города и будет добавлена позже." },
+  { id: 3, question: "Можно ли вернуть?", answer: "Да, в течение 14 дней при сохранении товарного вида (демо-правило)." }
 ];
 
 // ===== Helpers =====
@@ -10,114 +10,8 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const money = (n) => `${Number(n || 0).toFixed(2)} BYN`;
 
-function escapeHtml(str) {
-  return String(str ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function stripHtmlToText(html) {
-  // превращаем Woo description (html) в текст
-  const div = document.createElement("div");
-  div.innerHTML = String(html || "");
-  return (div.textContent || div.innerText || "").trim();
-}
-
-function declOfNum(n, titles) {
-  const cases = [2, 0, 1, 1, 1, 2];
-  return titles[(n % 100 > 4 && n % 100 < 20) ? 2 : cases[(n % 10 < 5) ? n % 10 : 5]];
-}
-
-function cfg() {
-  const url = window.APP_CONFIG?.BACKEND_URL;
-  if (!url) throw new Error("BACKEND_URL не задан. Добавь config.js и подключи его в index.html");
-  return { BACKEND_URL: String(url).replace(/\/+$/, "") };
-}
-
-function tg() { return window.Telegram?.WebApp; }
-
-function openPayUrl(url) {
-  const t = tg();
-  if (t?.openLink) return t.openLink(url);
-  window.location.href = url;
-}
-
-function uuidv4() {
-  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
-  const rnd = () => Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1);
-  return `${rnd()}${rnd()}-${rnd()}-${rnd()}-${rnd()}-${rnd()}${rnd()}${rnd()}`;
-}
-
-// ===== Catalog (from backend) =====
-let products = []; // normalized
-
-const PLACEHOLDER_IMG = "https://placehold.co/1200x800/png?text=No+Image";
-
-function normalizeProduct(p) {
-  const id = Number(p.id);
-  const title = String(p.title || p.name || "");
-  const sku = String(p.sku || "");
-  const category = String(p.category || "Без категории");
-  const photo_url = String(p.photo_url || p.image_url || "") || PLACEHOLDER_IMG;
-
-  const basePrice = Number(p.price_byn ?? p.price ?? 0) || 0;
-
-  const variations = Array.isArray(p.variations) ? p.variations : [];
-  const sizeLabels = variations.length > 0
-    ? variations.map(v => String(v.label || v.option || v.name || `Var ${v.variation_id}`))
-    : ["Стандарт"];
-
-  const sizeToVariationId = {};
-  const variationIdToPrice = {};
-  for (const v of variations) {
-    const label = String(v.label || v.option || v.name || `Var ${v.variation_id}`);
-    const vid = Number(v.variation_id || v.id || 0) || 0;
-    sizeToVariationId[label] = vid;
-
-    const vp = Number(v.price_byn ?? v.price ?? basePrice) || basePrice;
-    variationIdToPrice[vid] = vp;
-  }
-
-  const descText = stripHtmlToText(p.description || p.short_description || "");
-
-  // price for list: if basePrice=0 and have variations, show min variation price
-  let listPrice = basePrice;
-  if ((!listPrice || listPrice <= 0) && variations.length > 0) {
-    const prices = variations.map(v => Number(v.price_byn ?? v.price ?? 0)).filter(x => x > 0);
-    if (prices.length) listPrice = Math.min(...prices);
-  }
-
-  return {
-    id,
-    title,
-    sku,
-    category,
-    photo_url,
-    description_text: descText,
-    price_byn: listPrice,
-    base_price_byn: basePrice,
-    sizes: sizeLabels,
-    sizeToVariationId,
-    variationIdToPrice,
-    raw: p
-  };
-}
-
-async function loadCatalog() {
-  const url = `${cfg().BACKEND_URL}/catalog`;
-  const r = await fetch(url, { headers: { "accept": "application/json" } });
-  if (!r.ok) throw new Error(`catalog failed: ${r.status}`);
-  const data = await r.json();
-  if (!Array.isArray(data)) throw new Error("catalog: ожидался массив");
-  products = data.map(normalizeProduct);
-}
-
-// ===== Cart =====
-const LS_KEY = "miniapp_cart_v2";
-// cart: { "productId|variationId": { productId, variationId, size, qty } }
+const LS_KEY = "mini_cart_v2";
+// cart: { "productId|size": { productId, size, variationId, qty } }
 function loadCart() {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); }
   catch { return {}; }
@@ -126,9 +20,13 @@ function saveCart(cart) {
   localStorage.setItem(LS_KEY, JSON.stringify(cart));
   updateCartDot();
 }
+function cartKey(productId, size) { return `${productId}|${size}`; }
 
-function cartKey(productId, variationId) {
-  return `${productId}|${Number(variationId || 0)}`;
+function getCartQtyForProduct(productId) {
+  const cart = loadCart();
+  let sum = 0;
+  for (const k in cart) if (cart[k].productId === productId) sum += cart[k].qty;
+  return sum;
 }
 
 function updateCartDot() {
@@ -138,11 +36,28 @@ function updateCartDot() {
   if (dot) dot.classList.toggle("hidden", !has);
 }
 
-function getCartQtyForProduct(productId) {
-  const cart = loadCart();
-  let sum = 0;
-  for (const k in cart) if (cart[k].productId === productId) sum += cart[k].qty;
-  return sum;
+function getUserName() {
+  const tg = window.Telegram?.WebApp;
+  const n = tg?.initDataUnsafe?.user?.first_name;
+  return n || "друг";
+}
+
+function apiBase() {
+  const u = (window.APP_CONFIG?.BACKEND_URL || "").trim().replace(/\/+$/, "");
+  if (!u) throw new Error("BACKEND_URL не задан. Проверь config.js");
+  return u;
+}
+
+function openPayUrl(url) {
+  const tg = window.Telegram?.WebApp;
+  if (tg?.openLink) return tg.openLink(url);
+  window.location.href = url;
+}
+
+function uuidv4() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  const rnd = () => Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1);
+  return `${rnd()}${rnd()}-${rnd()}-${rnd()}-${rnd()}-${rnd()}${rnd()}${rnd()}`;
 }
 
 function cartHashForIdempotency() {
@@ -150,7 +65,8 @@ function cartHashForIdempotency() {
   const keys = Object.keys(cart).sort();
   return keys.map(k => {
     const it = cart[k];
-    return `${it.productId}:${Number(it.variationId || 0)}:${it.qty}`;
+    const vid = Number(it.variationId || 0);
+    return `${it.productId}:${vid}:${it.qty}`;
   }).join("|") || "empty";
 }
 
@@ -163,27 +79,84 @@ function getClientOrderIdForCart() {
   return map[h];
 }
 
-function findProduct(productId) {
-  return products.find(p => p.id === productId);
+// ===== Catalog (from backend) =====
+let products = [];
+
+const PLACEHOLDER_IMG = "https://placehold.co/1200x800/png?text=No+Image";
+
+function normalizeProduct(p) {
+  const id = Number(p.id);
+  const title = String(p.title || p.name || "");
+  const sku = String(p.sku || "");
+  const category = String(p.category || "Без категории");
+  const photo_url = String(p.photo_url || "") || PLACEHOLDER_IMG;
+
+  const desc = String(p.description || p.short_description || "");
+
+  const basePrice = Number(p.price_byn ?? p.price ?? 0) || 0;
+
+  const sizeToVariationId = {};
+  const sizeToPrice = {};
+  const variations = Array.isArray(p.variations) ? p.variations : [];
+
+  let sizes = ["Стандарт"];
+  if (variations.length > 0) {
+    sizes = variations.map(v => String(v.label || v.option || `Var ${v.variation_id}`));
+    for (const v of variations) {
+      const label = String(v.label || v.option || `Var ${v.variation_id}`);
+      const vid = Number(v.variation_id || 0) || 0;
+      const vp = Number(v.price_byn ?? v.price ?? basePrice) || basePrice;
+
+      sizeToVariationId[label] = vid;
+      sizeToPrice[label] = vp;
+    }
+  }
+
+  // price for list (если у variable basePrice пустой — берём min вариаций)
+  let listPrice = basePrice;
+  if ((!listPrice || listPrice <= 0) && variations.length > 0) {
+    const prices = variations.map(v => Number(v.price_byn ?? v.price ?? 0)).filter(x => x > 0);
+    if (prices.length) listPrice = Math.min(...prices);
+  }
+
+  return {
+    id,
+    title,
+    sku,
+    category,
+    photo_url,
+    description: desc,
+    price_byn: listPrice || 0,
+    sizes,
+    sizeToVariationId,
+    sizeToPrice
+  };
 }
 
-function getItemUnitPrice(product, variationId) {
-  if (!product) return 0;
-  const vid = Number(variationId || 0);
-  if (vid && product.variationIdToPrice && product.variationIdToPrice[vid] != null) {
-    return Number(product.variationIdToPrice[vid]) || 0;
-  }
-  // fallback to base/list price
-  return Number(product.base_price_byn || product.price_byn || 0) || 0;
+async function loadCatalog() {
+  const r = await fetch(`${apiBase()}/catalog`, { headers: { "accept": "application/json" } });
+  if (!r.ok) throw new Error(`catalog failed: ${r.status}`);
+  const data = await r.json();
+  if (!Array.isArray(data)) throw new Error("catalog: ожидался массив");
+  products = data.map(normalizeProduct);
+}
+
+function findProduct(productId) {
+  return products.find(x => x.id === productId);
+}
+
+function getUnitPrice(p, size) {
+  if (!p) return 0;
+  if (p.sizeToPrice && p.sizeToPrice[size] != null) return Number(p.sizeToPrice[size]) || 0;
+  return Number(p.price_byn || 0) || 0;
+}
+
+function getVariationId(p, size) {
+  const vid = Number(p?.sizeToVariationId?.[size] || 0);
+  return vid || null;
 }
 
 // ===== Splash (anti-freeze) =====
-function getUserName() {
-  const t = tg();
-  const n = t?.initDataUnsafe?.user?.first_name;
-  return n || "друг";
-}
-
 function initSplash() {
   try {
     const hello = $("#hello");
@@ -261,9 +234,9 @@ function renderHome(list) {
 
   if (!list || list.length === 0) {
     root.innerHTML = `
-      <div class="row" style="grid-column:1 / -1; cursor:default">
+      <div class="row" style="grid-column: 1 / -1; cursor: default">
         <div class="row__left">
-          <div class="row__title">Нет товаров</div>
+          <div class="row__title">Товаров пока нет</div>
           <div class="row__sub">Добавь товары в WooCommerce — они появятся тут</div>
         </div>
       </div>
@@ -278,7 +251,7 @@ function renderHome(list) {
     const card = document.createElement("div");
     card.className = "card";
     card.innerHTML = `
-      <img class="card__img" src="${escapeHtml(p.photo_url)}" alt="${escapeHtml(p.title)}" />
+      <img class="card__img" src="${p.photo_url}" alt="${escapeHtml(p.title)}" />
       <div class="card__body">
         <div class="card__title">${escapeHtml(p.title)}</div>
         <div class="card__sku">${escapeHtml(p.sku)} • ${escapeHtml(p.category)}</div>
@@ -308,13 +281,13 @@ function initSearch() {
 
 // ===== Categories =====
 function renderCategories() {
-  const cats = Array.from(new Set(products.map(p => p.category || "Без категории"))).sort();
+  const cats = Array.from(new Set(products.map(p => p.category))).sort();
   const root = $("#catList");
   if (!root) return;
   root.innerHTML = "";
 
   for (const c of cats) {
-    const count = products.filter(p => (p.category || "Без категории") === c).length;
+    const count = products.filter(p => p.category === c).length;
     const row = document.createElement("div");
     row.className = "row";
     row.innerHTML = `
@@ -333,7 +306,7 @@ function openCategory(categoryName) {
   const catTitle = $("#catTitle");
   if (catTitle) catTitle.textContent = categoryName;
 
-  const list = products.filter(p => (p.category || "Без категории") === categoryName);
+  const list = products.filter(p => p.category === categoryName);
 
   const cc = $("#catCount");
   if (cc) cc.textContent = `${list.length} ${declOfNum(list.length, ["товар", "товара", "товаров"])}`;
@@ -354,7 +327,7 @@ function renderCategoryProducts(list) {
     const card = document.createElement("div");
     card.className = "card";
     card.innerHTML = `
-      <img class="card__img" src="${escapeHtml(p.photo_url)}" alt="${escapeHtml(p.title)}" />
+      <img class="card__img" src="${p.photo_url}" alt="${escapeHtml(p.title)}" />
       <div class="card__body">
         <div class="card__title">${escapeHtml(p.title)}</div>
         <div class="card__sku">${escapeHtml(p.sku)}</div>
@@ -374,26 +347,21 @@ function openProduct(productId) {
   const p = findProduct(productId);
   if (!p) return;
 
-  const sizes = Array.isArray(p.sizes) && p.sizes.length ? p.sizes : ["Стандарт"];
-
-  let selectedSize = sizes[0];
+  let selectedSize = p.sizes[0];
   let qty = 1;
 
   const root = $("#productView");
   if (!root) return;
 
-  const selectedVariationId = () => Number(p.sizeToVariationId?.[selectedSize] || 0) || 0;
-  const selectedPrice = () => getItemUnitPrice(p, selectedVariationId());
-
   root.innerHTML = `
-    <img class="product__img" src="${escapeHtml(p.photo_url)}" alt="${escapeHtml(p.title)}" />
+    <img class="product__img" src="${p.photo_url}" alt="${escapeHtml(p.title)}" />
     <div class="product__title">${escapeHtml(p.title)}</div>
     <div class="product__meta">
       <span>${escapeHtml(p.sku)}</span>
       <span>•</span>
       <span>${escapeHtml(p.category)}</span>
       <span>•</span>
-      <strong id="prodPrice">${money(selectedPrice())}</strong>
+      <strong id="prodPrice">${money(getUnitPrice(p, selectedSize))}</strong>
     </div>
 
     <div class="pills" id="sizePills"></div>
@@ -409,7 +377,7 @@ function openProduct(productId) {
     <button class="btn btn--primary" id="addToCartBtn">Добавить в корзину</button>
 
     <div style="color: rgba(154,163,178,.92); line-height:1.35; font-size:13px">
-      ${escapeHtml(p.description_text || "")}
+      ${escapeHtml(p.description || "")}
     </div>
   `;
 
@@ -418,39 +386,27 @@ function openProduct(productId) {
   const renderPills = () => {
     if (!pills) return;
     pills.innerHTML = "";
-
-    for (const s of sizes) {
+    for (const s of p.sizes) {
       const b = document.createElement("button");
       b.className = "pill" + (s === selectedSize ? " active" : "");
       b.textContent = s;
-
-      // если товара без вариаций — оставляем одну “Стандарт” и не кликаем
-      const hasVariations = Object.keys(p.sizeToVariationId || {}).length > 0;
-      if (!hasVariations) {
-        b.disabled = true;
-        b.style.opacity = "0.9";
-        b.style.cursor = "default";
-      } else {
-        b.addEventListener("click", () => {
-          selectedSize = s;
-          renderPills();
-          renderInCartInfo();
-          const priceEl = $("#prodPrice");
-          if (priceEl) priceEl.textContent = money(selectedPrice());
-        });
-      }
+      b.addEventListener("click", () => {
+        selectedSize = s;
+        renderPills();
+        renderInCartInfo();
+        const priceEl = $("#prodPrice");
+        if (priceEl) priceEl.textContent = money(getUnitPrice(p, selectedSize));
+      });
       pills.appendChild(b);
     }
   };
 
   const renderInCartInfo = () => {
     const cart = loadCart();
-    const vid = selectedVariationId();
-    const k = cartKey(p.id, vid);
+    const k = cartKey(p.id, selectedSize);
     const cur = cart[k]?.qty || 0;
     const el = $("#inCartInfo");
     if (!el) return;
-
     el.innerHTML = cur > 0
       ? `<div class="badge" style="display:inline-flex">Уже в корзине: ${cur} шт. (размер ${escapeHtml(selectedSize)})</div>`
       : "";
@@ -474,18 +430,15 @@ function openProduct(productId) {
   const addBtn = $("#addToCartBtn");
   if (addBtn) addBtn.addEventListener("click", () => {
     const cart = loadCart();
-
-    const vid = selectedVariationId(); // 0 если simple
-    const k = cartKey(p.id, vid);
+    const k = cartKey(p.id, selectedSize);
     const prev = cart[k]?.qty || 0;
 
     cart[k] = {
       productId: p.id,
-      variationId: vid || null,
       size: selectedSize,
+      variationId: getVariationId(p, selectedSize),
       qty: Math.min(99, prev + qty)
     };
-
     saveCart(cart);
 
     renderHome(products);
@@ -500,7 +453,7 @@ function openProduct(productId) {
   showScreen("product", { title: "Товар" });
 }
 
-// ===== Cart render =====
+// ===== Cart =====
 function renderCart() {
   const cart = loadCart();
   const keys = Object.keys(cart);
@@ -529,20 +482,17 @@ function renderCart() {
     const p = findProduct(item.productId);
     if (!p) continue;
 
-    const unit = getItemUnitPrice(p, item.variationId);
+    const unit = getUnitPrice(p, item.size);
     const line = unit * item.qty;
     total += line;
-
-    const sizeText = item.size || "Стандарт";
-    const skuText = p.sku ? escapeHtml(p.sku) : "—";
 
     const row = document.createElement("div");
     row.className = "cartItem";
     row.innerHTML = `
-      <img class="cartItem__img" src="${escapeHtml(p.photo_url)}" alt="${escapeHtml(p.title)}"/>
+      <img class="cartItem__img" src="${p.photo_url}" alt="${escapeHtml(p.title)}"/>
       <div class="cartItem__mid">
         <div class="cartItem__title">${escapeHtml(p.title)}</div>
-        <div class="cartItem__sub">${skuText} • размер ${escapeHtml(sizeText)}</div>
+        <div class="cartItem__sub">${escapeHtml(p.sku)} • размер ${escapeHtml(item.size)}</div>
         <div class="cartItem__sub"><strong>${money(unit)}</strong> за шт.</div>
       </div>
       <div class="cartItem__right">
@@ -557,7 +507,7 @@ function renderCart() {
 
     row.querySelector('[data-act="plus"]').addEventListener("click", () => {
       const c = loadCart();
-      c[k].qty = Math.min(99, (c[k].qty || 0) + 1);
+      c[k].qty = Math.min(99, c[k].qty + 1);
       saveCart(c);
       renderCart();
       renderHome(products);
@@ -565,7 +515,7 @@ function renderCart() {
 
     row.querySelector('[data-act="minus"]').addEventListener("click", () => {
       const c = loadCart();
-      c[k].qty = (c[k].qty || 0) - 1;
+      c[k].qty -= 1;
       if (c[k].qty <= 0) delete c[k];
       saveCart(c);
       renderCart();
@@ -579,75 +529,59 @@ function renderCart() {
   if (totalEl) totalEl.textContent = money(total);
 }
 
-// ===== Checkout (REAL) =====
 let checkoutInFlight = false;
-
-async function createOrderFromCart() {
-  const cart = loadCart();
-  const keys = Object.keys(cart);
-  if (keys.length === 0) throw new Error("Корзина пустая");
-
-  const items = keys.map(k => {
-    const it = cart[k];
-    const payload = {
-      product_id: Number(it.productId),
-      quantity: Number(it.qty || 1),
-    };
-    const vid = Number(it.variationId || 0);
-    if (vid) payload.variation_id = vid;
-    return payload;
-  });
-
-  const body = {
-    items,
-    client_order_id: getClientOrderIdForCart(),
-    telegram_init_data: tg()?.initData || ""
-  };
-
-  const url = `${cfg().BACKEND_URL}/create-order`;
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "accept": "application/json" },
-    body: JSON.stringify(body)
-  });
-
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(`create-order ${r.status}: ${JSON.stringify(data)}`);
-  return data; // {order_id, pay_url}
-}
 
 function initCheckout() {
   const btn = $("#checkoutBtn");
   if (!btn) return;
 
   btn.addEventListener("click", async () => {
-    if (checkoutInFlight) return;
-
     const cart = loadCart();
     if (Object.keys(cart).length === 0) {
       alert("Корзина пустая");
       return;
     }
+    if (checkoutInFlight) return;
 
     try {
       checkoutInFlight = true;
       btn.disabled = true;
       btn.textContent = "Создаю заказ…";
 
-      const res = await createOrderFromCart();
+      const items = Object.keys(cart).map(k => {
+        const it = cart[k];
+        const payload = {
+          product_id: Number(it.productId),
+          quantity: Number(it.qty || 1),
+        };
+        const vid = Number(it.variationId || 0);
+        if (vid) payload.variation_id = vid;
+        return payload;
+      });
 
-      // возвращаем кнопку, но обычно пользователь уже ушёл на оплату
-      btn.textContent = "Оформить";
-      btn.disabled = false;
-      checkoutInFlight = false;
+      const body = {
+        items,
+        telegram_init_data: window.Telegram?.WebApp?.initData || "",
+        client_order_id: getClientOrderIdForCart()
+      };
 
-      openPayUrl(res.pay_url);
+      const r = await fetch(`${apiBase()}/create-order`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "accept": "application/json" },
+        body: JSON.stringify(body)
+      });
+
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(`create-order ${r.status}: ${JSON.stringify(data)}`);
+
+      openPayUrl(data.pay_url);
     } catch (e) {
       console.error(e);
       alert(String(e.message || e));
-      btn.textContent = "Оформить";
-      btn.disabled = false;
+    } finally {
       checkoutInFlight = false;
+      btn.disabled = false;
+      btn.textContent = "Оформить";
     }
   });
 }
@@ -725,10 +659,25 @@ function initTabs() {
   if (back) back.addEventListener("click", goBack);
 }
 
+// ===== Utils =====
+function escapeHtml(str) {
+  return String(str || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function declOfNum(n, titles) {
+  const cases = [2, 0, 1, 1, 1, 2];
+  return titles[(n % 100 > 4 && n % 100 < 20) ? 2 : cases[(n % 10 < 5) ? n % 10 : 5]];
+}
+
 // ===== Init =====
 async function init() {
-  const t = tg();
-  try { t?.ready?.(); t?.expand?.(); } catch {}
+  const tg = window.Telegram?.WebApp;
+  try { tg?.ready?.(); tg?.expand?.(); } catch {}
 
   initSplash();
   initTabs();
@@ -737,13 +686,14 @@ async function init() {
   initCheckout();
 
   updateCartDot();
+
   navStack = [];
 
-  // небольшой “лоадер” в виде карточки
+  // небольшой placeholder пока грузится каталог
   const home = $("#homeList");
   if (home) {
     home.innerHTML = `
-      <div class="row" style="grid-column:1 / -1; cursor:default">
+      <div class="row" style="grid-column: 1 / -1; cursor: default">
         <div class="row__left">
           <div class="row__title">Загрузка каталога…</div>
           <div class="row__sub">Подключаемся к серверу</div>
@@ -762,6 +712,6 @@ async function init() {
 document.addEventListener("DOMContentLoaded", () => {
   init().catch(err => {
     console.error(err);
-    alert("Не удалось загрузить каталог. Проверь BACKEND_URL и endpoint /catalog на backend.");
+    alert("Не удалось загрузить каталог. Проверь BACKEND_URL в config.js и endpoint /catalog на backend.");
   });
 });
